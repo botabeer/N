@@ -35,21 +35,22 @@ handler = WebhookHandler(LINE_CHANNEL_SECRET)
 content_lock = Lock()
 
 class ContentManager:
-    """مدير المحتوى مع معالجة أفضل للأخطاء"""
+    """مدير المحتوى المطور"""
     
     def __init__(self):
         self.content_files: Dict[str, List[str]] = {}
-        self.more_questions: List[str] = []
-        self.proverbs_list: List[dict] = []
-        self.riddles_list: List[dict] = []
+        self.poems_list: List[dict] = []
+        self.quotes_list: List[dict] = []
+        self.stories_list: List[dict] = []
+        self.would_you_rather: List[dict] = []
         self.games_list: List[dict] = []
         self.detailed_results: Dict = {}
         
-        # تتبع العناصر المستخدمة لكل قسم
+        # تتبع العناصر المستخدمة
         self.used_indices: Dict[str, List[int]] = {}
         
     def load_file_lines(self, filename: str) -> List[str]:
-        """تحميل محتوى ملف نصي مع معالجة أفضل للأخطاء"""
+        """تحميل محتوى ملف نصي"""
         if not os.path.exists(filename):
             logger.warning(f"الملف غير موجود: {filename}")
             return []
@@ -58,15 +59,12 @@ class ContentManager:
                 lines = [line.strip() for line in f if line.strip()]
                 logger.info(f"تم تحميل {len(lines)} سطر من {filename}")
                 return lines
-        except UnicodeDecodeError:
-            logger.error(f"خطأ في ترميز الملف: {filename}")
-            return []
-        except IOError as e:
+        except Exception as e:
             logger.error(f"خطأ في قراءة الملف {filename}: {e}")
             return []
     
     def load_json_file(self, filename: str) -> Union[dict, list]:
-        """تحميل ملف JSON مع معالجة أفضل"""
+        """تحميل ملف JSON"""
         if not os.path.exists(filename):
             logger.warning(f"الملف غير موجود: {filename}")
             return [] if filename.endswith("s.json") else {}
@@ -75,32 +73,31 @@ class ContentManager:
                 data = json.load(f)
                 logger.info(f"تم تحميل {filename}")
                 return data
-        except json.JSONDecodeError as e:
-            logger.error(f"خطأ في بنية JSON في {filename}: {e}")
-            return [] if filename.endswith("s.json") else {}
-        except IOError as e:
+        except Exception as e:
             logger.error(f"خطأ في قراءة {filename}: {e}")
             return [] if filename.endswith("s.json") else {}
     
     def initialize(self):
         """تحميل جميع الملفات"""
-        # تحميل الملفات النصية
+        # تحميل الملفات الأساسية
         self.content_files = {
             "سؤال": self.load_file_lines("questions.txt"),
             "تحدي": self.load_file_lines("challenges.txt"),
             "اعتراف": self.load_file_lines("confessions.txt"),
+            "أكثر": self.load_file_lines("more_questions.txt"),
         }
         
         # تهيئة قوائم التتبع
-        self.used_indices = {key: [] for key in self.content_files.keys()}
-        self.used_indices["أكثر"] = []
-        self.used_indices["أمثال"] = []
-        self.used_indices["لغز"] = []
+        self.used_indices = {
+            "سؤال": [], "تحدي": [], "اعتراف": [], "أكثر": [],
+            "شعر": [], "حكمة": [], "قصة": [], "اختيار": []
+        }
         
-        # تحميل الملفات الأخرى
-        self.more_questions = self.load_file_lines("more_file.txt")
-        self.proverbs_list = self.load_json_file("proverbs.json")
-        self.riddles_list = self.load_json_file("riddles.json")
+        # تحميل المحتوى الإضافي
+        self.poems_list = self.load_json_file("poems.json")
+        self.quotes_list = self.load_json_file("quotes.json")
+        self.stories_list = self.load_json_file("stories.json")
+        self.would_you_rather = self.load_json_file("would_you_rather.json")
         self.detailed_results = self.load_json_file("detailed_results.json")
         
         # تحميل الألعاب
@@ -115,24 +112,21 @@ class ContentManager:
     def get_random_index(self, command: str, max_length: int) -> int:
         """الحصول على index عشوائي غير مكرر"""
         with content_lock:
-            # إذا استخدمنا كل العناصر، نعيد البدء
             if len(self.used_indices[command]) >= max_length:
                 self.used_indices[command] = []
             
-            # إنشاء قائمة بالـ indices المتاحة
-            available_indices = [i for i in range(max_length) if i not in self.used_indices[command]]
+            available_indices = [i for i in range(max_length) 
+                               if i not in self.used_indices[command]]
             
-            # اختيار index عشوائي
             if available_indices:
                 index = random.choice(available_indices)
                 self.used_indices[command].append(index)
                 return index
             
-            # fallback: اختيار عشوائي بالكامل
             return random.randint(0, max_length - 1)
     
     def get_content(self, command: str) -> Optional[str]:
-        """الحصول على محتوى عشوائي مع تجنب التكرار"""
+        """الحصول على محتوى عشوائي"""
         file_list = self.content_files.get(command, [])
         if not file_list:
             return None
@@ -140,38 +134,45 @@ class ContentManager:
         index = self.get_random_index(command, len(file_list))
         return file_list[index]
     
-    def get_more_question(self) -> Optional[str]:
-        """الحصول على سؤال 'أكثر' عشوائي"""
-        if not self.more_questions:
+    def get_poem(self) -> Optional[dict]:
+        """الحصول على قصيدة عشوائية"""
+        if not self.poems_list:
             return None
         
-        index = self.get_random_index("أكثر", len(self.more_questions))
-        return self.more_questions[index]
+        index = self.get_random_index("شعر", len(self.poems_list))
+        return self.poems_list[index]
     
-    def get_proverb(self) -> Optional[dict]:
-        """الحصول على مثل عشوائي"""
-        if not self.proverbs_list:
+    def get_quote(self) -> Optional[dict]:
+        """الحصول على حكمة عشوائية"""
+        if not self.quotes_list:
             return None
         
-        index = self.get_random_index("أمثال", len(self.proverbs_list))
-        return self.proverbs_list[index]
+        index = self.get_random_index("حكمة", len(self.quotes_list))
+        return self.quotes_list[index]
     
-    def get_riddle(self) -> Optional[dict]:
-        """الحصول على لغز عشوائي"""
-        if not self.riddles_list:
+    def get_story(self) -> Optional[dict]:
+        """الحصول على قصة عشوائية"""
+        if not self.stories_list:
             return None
         
-        index = self.get_random_index("لغز", len(self.riddles_list))
-        return self.riddles_list[index]
+        index = self.get_random_index("قصة", len(self.stories_list))
+        return self.stories_list[index]
+    
+    def get_would_you_rather(self) -> Optional[dict]:
+        """الحصول على سؤال 'هل تفضل'"""
+        if not self.would_you_rather:
+            return None
+        
+        index = self.get_random_index("اختيار", len(self.would_you_rather))
+        return self.would_you_rather[index]
 
 # تهيئة مدير المحتوى
 content_manager = ContentManager()
 content_manager.initialize()
 
-# === حالات المستخدمين (يفضل استخدام Redis في الإنتاج) ===
+# === حالات المستخدمين ===
 user_game_state: Dict[str, dict] = {}
-user_proverb_state: Dict[str, dict] = {}
-user_riddle_state: Dict[str, dict] = {}
+user_story_state: Dict[str, dict] = {}
 
 # === خريطة الأوامر ===
 COMMANDS_MAP = {
@@ -179,8 +180,10 @@ COMMANDS_MAP = {
     "تحدي": ["تحدي", "تحديات", "تحد"],
     "اعتراف": ["اعتراف", "اعترافات"],
     "أكثر": ["أكثر", "اكثر", "زيادة"],
-    "أمثال": ["أمثال", "امثال", "مثل"],
-    "لغز": ["لغز", "الغاز", "ألغاز"]
+    "شعر": ["شعر", "قصيدة", "قصيده", "ابيات"],
+    "حكمة": ["حكمة", "حكم", "اقتباس", "اقتباسات", "quote"],
+    "قصة": ["قصة", "قصه", "حكاية", "story"],
+    "اختيار": ["اختيار", "هل تفضل", "خيار", "would you rather"]
 }
 
 def find_command(text: str) -> Optional[str]:
@@ -192,15 +195,17 @@ def find_command(text: str) -> Optional[str]:
     return None
 
 def create_main_menu() -> QuickReply:
-    """إنشاء القائمة السريعة"""
+    """إنشاء القائمة السريعة المطورة"""
     return QuickReply(items=[
         QuickReplyButton(action=MessageAction(label="❓ سؤال", text="سؤال")),
         QuickReplyButton(action=MessageAction(label="🎯 تحدي", text="تحدي")),
         QuickReplyButton(action=MessageAction(label="💬 اعتراف", text="اعتراف")),
         QuickReplyButton(action=MessageAction(label="✨ أكثر", text="أكثر")),
+        QuickReplyButton(action=MessageAction(label="📖 شعر", text="شعر")),
+        QuickReplyButton(action=MessageAction(label="💡 حكمة", text="حكمة")),
+        QuickReplyButton(action=MessageAction(label="📚 قصة", text="قصة")),
+        QuickReplyButton(action=MessageAction(label="🤔 اختيار", text="اختيار")),
         QuickReplyButton(action=MessageAction(label="🎮 لعبة", text="لعبه")),
-        QuickReplyButton(action=MessageAction(label="📜 أمثال", text="أمثال")),
-        QuickReplyButton(action=MessageAction(label="🧩 لغز", text="لغز")),
     ])
 
 def get_games_list() -> str:
@@ -208,10 +213,7 @@ def get_games_list() -> str:
     if not content_manager.games_list:
         return "⚠️ لا توجد ألعاب متاحة حالياً."
     
-    # بناء القائمة ديناميكياً بناءً على عدد الألعاب الموجودة
     titles = ["🎮 الألعاب المتاحة:", ""]
-    
-    # الرموز للأرقام
     number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
     
     for i, game in enumerate(content_manager.games_list):
@@ -245,12 +247,11 @@ def calculate_result(answers: List[str], game_index: int) -> str:
 # === Routes ===
 @app.route("/", methods=["GET"])
 def home():
-    return "✅ البوت يعمل بنجاح!", 200
+    return "✅ البوت المطور يعمل بنجاح!", 200
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    """نقطة فحص صحة التطبيق"""
-    return {"status": "healthy", "service": "line-bot"}, 200
+    return {"status": "healthy", "service": "enhanced-line-bot"}, 200
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -276,31 +277,38 @@ def handle_message(event):
     text_lower = text.lower()
     
     try:
-        # === أمر المساعدة ===
-        if text_lower in ["مساعدة", "help", "بداية", "start"]:
+        # أمر المساعدة
+        if text_lower in ["مساعدة", "help", "بداية", "start", "قائمة", "menu"]:
+            welcome_msg = "🌟 مرحباً بك في البوت الشامل!\n\n"
+            welcome_msg += "📋 الميزات المتاحة:\n"
+            welcome_msg += "❓ أسئلة عميقة ومثيرة\n"
+            welcome_msg += "🎯 تحديات ممتعة\n"
+            welcome_msg += "💬 اعترافات صادقة\n"
+            welcome_msg += "📖 أشعار وأبيات\n"
+            welcome_msg += "💡 حكم واقتباسات\n"
+            welcome_msg += "📚 قصص ملهمة\n"
+            welcome_msg += "🤔 أسئلة الاختيار\n"
+            welcome_msg += "🎮 ألعاب شخصية\n\n"
+            welcome_msg += "✨ اختر من القائمة أدناه:"
+            
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text="اختر من القائمة أدناه:", quick_reply=create_main_menu())
+                TextSendMessage(text=welcome_msg, quick_reply=create_main_menu())
             )
             return
         
-        # === معالجة الأوامر الأساسية ===
+        # معالجة الأوامر الأساسية
         command = find_command(text)
         if command:
             handle_content_command(event, command)
             return
         
-        # === معالجة إجابات الأمثال والألغاز ===
-        if text_lower in ["جاوب", "الجواب", "الاجابة", "اجابة"]:
-            handle_answer_command(event, user_id)
+        # معالجة طلب تكملة القصة
+        if text_lower in ["كمل", "كمل القصة", "التكملة", "استمر"]:
+            handle_story_continuation(event, user_id)
             return
         
-        # === معالجة التلميح ===
-        if text_lower in ["لمح", "تلميح", "hint"]:
-            handle_hint_command(event, user_id)
-            return
-        
-        # === معالجة طلب الألعاب ===
+        # معالجة طلب الألعاب
         if text_lower in ["لعبه", "لعبة", "العاب", "ألعاب", "game"]:
             line_bot_api.reply_message(
                 event.reply_token,
@@ -308,18 +316,24 @@ def handle_message(event):
             )
             return
         
-        # === معالجة اختيار اللعبة ===
+        # معالجة اختيار اللعبة
         if text.isdigit():
             handle_game_selection(event, user_id, int(text))
             return
         
-        # === معالجة إجابات اللعبة ===
+        # معالجة إجابات اللعبة
         if user_id in user_game_state:
             handle_game_answer(event, user_id, text)
             return
         
-        # تجاهل أي رسائل أخرى
-        return
+        # رسالة افتراضية
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(
+                text="💫 اكتب 'قائمة' لعرض الخيارات المتاحة",
+                quick_reply=create_main_menu()
+            )
+        )
         
     except Exception as e:
         logger.error(f"خطأ في معالجة الرسالة: {e}", exc_info=True)
@@ -331,32 +345,50 @@ def handle_message(event):
         except:
             pass
 
-
-
 def handle_content_command(event, command: str):
-    """معالجة أوامر المحتوى"""
-    if command == "أمثال":
-        proverb = content_manager.get_proverb()
-        if not proverb:
-            content = "⚠️ لا توجد أمثال متاحة حالياً."
-        else:
-            user_proverb_state[event.source.user_id] = proverb
-            content = f"📜 المثل:\n{proverb['question']}\n\n💡 اكتب 'جاوب' لمعرفة المعنى"
+    """معالجة أوامر المحتوى المطورة"""
     
-    elif command == "لغز":
-        riddle = content_manager.get_riddle()
-        if not riddle:
-            content = "⚠️ لا توجد ألغاز متاحة حالياً."
+    if command == "شعر":
+        poem = content_manager.get_poem()
+        if not poem:
+            content = "⚠️ لا توجد قصائد متاحة حالياً."
         else:
-            user_riddle_state[event.source.user_id] = riddle
-            content = f"🧩 اللغز:\n{riddle['question']}\n\n💡 اكتب 'لمح' للتلميح أو 'جاوب' للإجابة"
+            content = f"📖 {poem.get('title', 'قصيدة')}\n"
+            content += f"✍️ {poem.get('poet', 'شاعر')}\n\n"
+            content += f"{poem['text']}\n\n"
+            if 'meaning' in poem:
+                content += f"💡 {poem['meaning']}"
     
-    elif command == "أكثر":
-        question = content_manager.get_more_question()
-        if not question:
-            content = "⚠️ لا توجد أسئلة متاحة في قسم 'أكثر'."
+    elif command == "حكمة":
+        quote = content_manager.get_quote()
+        if not quote:
+            content = "⚠️ لا توجد حكم متاحة حالياً."
         else:
-            content = question
+            content = f"💡 {quote['text']}\n\n"
+            if 'author' in quote and quote['author']:
+                content += f"✍️ {quote['author']}"
+    
+    elif command == "قصة":
+        story = content_manager.get_story()
+        if not story:
+            content = "⚠️ لا توجد قصص متاحة حالياً."
+        else:
+            user_story_state[event.source.user_id] = story
+            content = f"📚 {story.get('title', 'قصة')}\n\n"
+            content += f"{story['part1']}\n\n"
+            if 'part2' in story:
+                content += "💬 اكتب 'كمل' لقراءة التكملة"
+    
+    elif command == "اختيار":
+        choice = content_manager.get_would_you_rather()
+        if not choice:
+            content = "⚠️ لا توجد أسئلة متاحة حالياً."
+        else:
+            content = f"🤔 هل تفضل:\n\n"
+            content += f"🅰️ {choice['option_a']}\n\n"
+            content += f"أم\n\n"
+            content += f"🅱️ {choice['option_b']}\n\n"
+            content += "💭 فكّر جيداً قبل الاختيار!"
     
     else:
         content = content_manager.get_content(command)
@@ -368,32 +400,27 @@ def handle_content_command(event, command: str):
         TextSendMessage(text=content, quick_reply=create_main_menu())
     )
 
-def handle_answer_command(event, user_id: str):
-    """معالجة طلب الإجابة"""
-    if user_id in user_proverb_state:
-        proverb = user_proverb_state.pop(user_id)
-        msg = f"✅ معنى المثل:\n{proverb['answer']}"
+def handle_story_continuation(event, user_id: str):
+    """معالجة طلب تكملة القصة"""
+    if user_id in user_story_state:
+        story = user_story_state.pop(user_id)
+        if 'part2' in story:
+            msg = f"📚 تكملة القصة:\n\n{story['part2']}\n\n"
+            if 'moral' in story:
+                msg += f"🌟 العبرة:\n{story['moral']}"
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=msg, quick_reply=create_main_menu())
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="⚠️ لا توجد تكملة لهذه القصة")
+            )
+    else:
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=msg, quick_reply=create_main_menu())
-        )
-    elif user_id in user_riddle_state:
-        riddle = user_riddle_state.pop(user_id)
-        msg = f"✅ الإجابة:\n{riddle['answer']}"
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=msg, quick_reply=create_main_menu())
-        )
-
-def handle_hint_command(event, user_id: str):
-    """معالجة طلب التلميح"""
-    if user_id in user_riddle_state:
-        riddle = user_riddle_state[user_id]
-        hint = riddle.get('hint', 'لا يوجد تلميح')
-        msg = f"💡 التلميح:\n{hint}"
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=msg)
+            TextSendMessage(text="⚠️ لم تبدأ قصة بعد! اكتب 'قصة' للبدء")
         )
 
 def handle_game_selection(event, user_id: str, num: int):
@@ -441,7 +468,7 @@ def handle_game_answer(event, user_id: str, text: str):
             )
         else:
             result = calculate_result(state["answers"], state["game_index"])
-            final_msg = f" انتهت اللعبة!\n\n{result}\n\n💬 أرسل 'لعبه' لتجربة لعبة أخرى!"
+            final_msg = f"🎉 انتهت اللعبة!\n\n{result}\n\n💬 أرسل 'لعبه' لتجربة لعبة أخرى!"
             
             line_bot_api.reply_message(
                 event.reply_token,
@@ -449,10 +476,8 @@ def handle_game_answer(event, user_id: str, text: str):
             )
             del user_game_state[user_id]
 
-
-
 # === تشغيل التطبيق ===
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5000))
-    logger.info(f"البوت يعمل على المنفذ {port}")
+    logger.info(f"البوت المطور يعمل على المنفذ {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
