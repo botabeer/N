@@ -150,10 +150,22 @@ with open("stories.json","r",encoding="utf-8") as f:
     stories_list = json.load(f)
 
 def get_random_story() -> str:
+    """
+    تختار قصة عشوائية من stories_list وتعيدها في رسالة واحدة.
+    كل قصة تحتوي على:
+    - title: عنوان القصة
+    - story: نص القصة
+    - moral: العبرة
+    """
     if not stories_list:
         return "⚠️ لا توجد قصص متاحة حالياً."
-    story = random.choice(stories_list)
-    return f"📖 {story['title']}\n\n{story['part1']}\n\n{story['part2']}\n\n{story['moral']}"
+
+    story_entry = random.choice(stories_list)
+    title = story_entry.get("title", "قصة غير معروفة")
+    story_text = story_entry.get("story", "")
+    moral = story_entry.get("moral", "")
+
+    return f"📖 {title}\n\n{story_text}\n\n{moral}"
 
 # === المستخدمين وحالتهم ===
 user_game_state: Dict[str, dict] = {}
@@ -249,7 +261,7 @@ def handle_message(event):
     try:
         if text_lower in ["مساعدة","help","start","بداية"]:
             line_bot_api.reply_message(event.reply_token, TextSendMessage(
-                text="مرحبا! اختر من القائمة أدناه:", quick_reply=create_main_menu()))
+                text="اختر من القائمة أدناه:", quick_reply=create_main_menu()))
             return
 
         command = find_command(text)
@@ -266,20 +278,12 @@ def handle_message(event):
             return
 
         if text_lower in ["لعبه","لعبة","العاب","ألعاب","game"]:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=get_games_list()))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="🎮 الألعاب مؤقتاً غير مفعلة"))
             return
 
         if text_lower in ["قصة","story"]:
             story_msg = get_random_story()
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=story_msg, quick_reply=create_main_menu()))
-            return
-
-        if text.isdigit():
-            handle_game_selection(event,user_id,int(text))
-            return
-
-        if user_id in user_game_state:
-            handle_game_answer(event,user_id,text)
             return
 
     except Exception as e:
