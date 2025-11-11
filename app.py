@@ -220,7 +220,7 @@ def handle_game_selection(event,user_id:str,num:int):
         first_q = game["questions"][0]
         options = "\n".join([f"{k}. {v}" for k,v in first_q["options"].items()])
         msg = f"🎮 {game.get('title', f'اللعبة {num}')}\n\n❓ {first_q['question']}\n\n{options}\n\n📝 أرسل: أ، ب، ج"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg, quick_reply=create_main_menu()))
 
 def handle_game_answer(event,user_id:str,text:str):
     state = user_game_state.get(user_id)
@@ -236,7 +236,7 @@ def handle_game_answer(event,user_id:str,text:str):
             options = "\n".join([f"{k}. {v}" for k,v in q["options"].items()])
             progress = f"[{state['question_index']+1}/{len(game['questions'])}]"
             msg = f"{progress} ❓ {q['question']}\n\n{options}\n\n📝 أرسل: أ، ب، ج"
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=msg, quick_reply=create_main_menu()))
         else:
             result = calculate_result(state["answers"], state["game_index"])
             final_msg = f"🏁 انتهت اللعبة!\n\n{result}\n\n💬 أرسل 'لعبه' لتجربة لعبة أخرى!"
@@ -287,7 +287,7 @@ def handle_hint_command(event, user_id: str):
     if user_id in user_riddle_state:
         riddle = user_riddle_state[user_id]
         hint = riddle.get('hint','لا يوجد تلميح')
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 التلميح:\n{hint}"))
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"💡 التلميح:\n{hint}", quick_reply=create_main_menu()))
 
 # === Routes ===
 @app.route("/", methods=["GET"])
@@ -319,17 +319,15 @@ def handle_message(event):
     text_lower = text.lower()
 
     try:
+        # رسالة المساعدة مع أزرار ثابتة
         if text_lower in ["مساعدة","help","بداية","start"]:
-            flex_msg = FlexSendMessage(
-                alt_text="مساعدة البوت",
-                contents={
-                    "type":"bubble",
-                    "body":{"type":"box","layout":"vertical","contents":[
-                        {"type":"text","text":"مرحبا! اختر من القائمة أدناه:"}
-                    ]}
-                }
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text="اختر من القائمة أدناه",
+                    quick_reply=create_main_menu()
+                )
             )
-            line_bot_api.reply_message(event.reply_token, flex_msg)
             return
 
         command = find_command(text)
@@ -346,7 +344,13 @@ def handle_message(event):
             return
 
         if text_lower in ["لعبه","لعبة","العاب","ألعاب","game"]:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=get_games_list()))
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text=get_games_list(),
+                    quick_reply=create_main_menu()
+                )
+            )
             return
 
         if text.isdigit():
@@ -360,7 +364,13 @@ def handle_message(event):
     except Exception as e:
         logger.error(f"خطأ في معالجة الرسالة: {e}", exc_info=True)
         try:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text="⚠️ حدث خطأ، يرجى المحاولة مرة أخرى"))
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(
+                    text="⚠️ حدث خطأ، يرجى المحاولة مرة أخرى",
+                    quick_reply=create_main_menu()
+                )
+            )
         except:
             pass
 
