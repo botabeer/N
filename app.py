@@ -8,8 +8,9 @@ from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
 from linebot.models import (
-    MessageEvent, TextMessage, TextSendMessage, 
-    QuickReply, QuickReplyButton, MessageAction
+    MessageEvent, TextMessage, TextSendMessage, FlexSendMessage,
+    QuickReply, QuickReplyButton, MessageAction, PostbackEvent,
+    RichMenu, RichMenuSize, RichMenuArea, RichMenuBounds, URIAction
 )
 
 # === إعداد Logging ===
@@ -40,9 +41,9 @@ class ContentManager:
     def __init__(self):
         self.content_files: Dict[str, List[str]] = {}
         self.poems_list: List[dict] = []
+        self.arab_poets: List[dict] = []  # قصائد الشعراء العرب
         self.quotes_list: List[dict] = []
         self.stories_list: List[dict] = []
-        self.would_you_rather: List[dict] = []
         self.games_list: List[dict] = []
         self.detailed_results: Dict = {}
         
@@ -90,14 +91,14 @@ class ContentManager:
         # تهيئة قوائم التتبع
         self.used_indices = {
             "سؤال": [], "تحدي": [], "اعتراف": [], "أكثر": [],
-            "شعر": [], "حكمة": [], "قصة": [], "اختيار": []
+            "شعر": [], "قصيدة": [], "حكمة": [], "قصة": []
         }
         
         # تحميل المحتوى الإضافي
         self.poems_list = self.load_json_file("poems.json")
+        self.arab_poets = self.load_json_file("arab_poets.json")  # قصائد الشعراء العرب
         self.quotes_list = self.load_json_file("quotes.json")
         self.stories_list = self.load_json_file("stories.json")
-        self.would_you_rather = self.load_json_file("would_you_rather.json")
         self.detailed_results = self.load_json_file("detailed_results.json")
         
         # تحميل الألعاب
@@ -142,6 +143,14 @@ class ContentManager:
         index = self.get_random_index("شعر", len(self.poems_list))
         return self.poems_list[index]
     
+    def get_arab_poem(self) -> Optional[dict]:
+        """الحصول على قصيدة لشاعر عربي"""
+        if not self.arab_poets:
+            return None
+        
+        index = self.get_random_index("قصيدة", len(self.arab_poets))
+        return self.arab_poets[index]
+    
     def get_quote(self) -> Optional[dict]:
         """الحصول على حكمة عشوائية"""
         if not self.quotes_list:
@@ -157,14 +166,6 @@ class ContentManager:
         
         index = self.get_random_index("قصة", len(self.stories_list))
         return self.stories_list[index]
-    
-    def get_would_you_rather(self) -> Optional[dict]:
-        """الحصول على سؤال 'هل تفضل'"""
-        if not self.would_you_rather:
-            return None
-        
-        index = self.get_random_index("اختيار", len(self.would_you_rather))
-        return self.would_you_rather[index]
 
 # تهيئة مدير المحتوى
 content_manager = ContentManager()
@@ -180,10 +181,10 @@ COMMANDS_MAP = {
     "تحدي": ["تحدي", "تحديات", "تحد"],
     "اعتراف": ["اعتراف", "اعترافات"],
     "أكثر": ["أكثر", "اكثر", "زيادة"],
-    "شعر": ["شعر", "قصيدة", "قصيده", "ابيات"],
-    "حكمة": ["حكمة", "حكم", "اقتباس", "اقتباسات", "quote"],
-    "قصة": ["قصة", "قصه", "حكاية", "story"],
-    "اختيار": ["اختيار", "هل تفضل", "خيار", "would you rather"]
+    "شعر": ["شعر", "ابيات"],
+    "قصيدة": ["قصيدة", "قصيده", "شاعر", "شعراء"],
+    "حكمة": ["حكمة", "حكم", "اقتباس", "اقتباسات"],
+    "قصة": ["قصة", "قصه", "حكاية"]
 }
 
 def find_command(text: str) -> Optional[str]:
@@ -194,55 +195,368 @@ def find_command(text: str) -> Optional[str]:
             return key
     return None
 
-def create_main_menu() -> QuickReply:
-    """إنشاء القائمة السريعة المطورة"""
-    return QuickReply(items=[
-        QuickReplyButton(action=MessageAction(label="❓ سؤال", text="سؤال")),
-        QuickReplyButton(action=MessageAction(label="🎯 تحدي", text="تحدي")),
-        QuickReplyButton(action=MessageAction(label="💬 اعتراف", text="اعتراف")),
-        QuickReplyButton(action=MessageAction(label="✨ أكثر", text="أكثر")),
-        QuickReplyButton(action=MessageAction(label="📖 شعر", text="شعر")),
-        QuickReplyButton(action=MessageAction(label="💡 حكمة", text="حكمة")),
-        QuickReplyButton(action=MessageAction(label="📚 قصة", text="قصة")),
-        QuickReplyButton(action=MessageAction(label="🤔 اختيار", text="اختيار")),
-        QuickReplyButton(action=MessageAction(label="🎮 لعبة", text="لعبه")),
-    ])
+# === Flex Messages للعرض الاحترافي ===
 
-def get_games_list() -> str:
-    """قائمة الألعاب المتاحة"""
+def create_welcome_flex() -> dict:
+    """إنشاء رسالة ترحيب احترافية بتصميم Flex"""
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "مرحباً بك",
+                            "weight": "bold",
+                            "size": "xxl",
+                            "align": "center",
+                            "color": "#1a1a1a"
+                        },
+                        {
+                            "type": "text",
+                            "text": "في بوت الأسئلة والأشعار",
+                            "size": "md",
+                            "align": "center",
+                            "color": "#666666",
+                            "margin": "md"
+                        }
+                    ],
+                    "paddingBottom": "20px"
+                },
+                {
+                    "type": "separator",
+                    "color": "#d9d9d9"
+                },
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "الميزات المتاحة",
+                            "weight": "bold",
+                            "size": "lg",
+                            "color": "#1a1a1a",
+                            "margin": "lg"
+                        },
+                        create_feature_box("💭", "أسئلة عميقة", "اكتشف أسئلة مثيرة للتفكير"),
+                        create_feature_box("🎯", "تحديات", "تحديات ممتعة ومشوقة"),
+                        create_feature_box("💬", "اعترافات", "شارك اعترافاتك بصراحة"),
+                        create_feature_box("📖", "قصائد الشعراء", "قصائد من كبار الشعراء العرب"),
+                        create_feature_box("✨", "أبيات شعرية", "أشعار منوعة وجميلة"),
+                        create_feature_box("💡", "حكم واقتباسات", "حكم ملهمة من التراث"),
+                        create_feature_box("📚", "قصص", "قصص هادفة وممتعة"),
+                        create_feature_box("🎮", "ألعاب شخصية", "اكتشف شخصيتك")
+                    ],
+                    "spacing": "sm",
+                    "margin": "lg"
+                }
+            ],
+            "paddingAll": "20px",
+            "backgroundColor": "#ffffff"
+        },
+        "styles": {
+            "body": {
+                "separator": True
+            }
+        }
+    }
+
+def create_feature_box(emoji: str, title: str, desc: str) -> dict:
+    """إنشاء صندوق ميزة"""
+    return {
+        "type": "box",
+        "layout": "horizontal",
+        "contents": [
+            {
+                "type": "text",
+                "text": emoji,
+                "size": "xl",
+                "flex": 0
+            },
+            {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": title,
+                        "weight": "bold",
+                        "size": "sm",
+                        "color": "#1a1a1a"
+                    },
+                    {
+                        "type": "text",
+                        "text": desc,
+                        "size": "xs",
+                        "color": "#8c8c8c",
+                        "wrap": True
+                    }
+                ],
+                "spacing": "xs",
+                "margin": "md"
+            }
+        ],
+        "spacing": "md",
+        "margin": "md"
+    }
+
+def create_content_flex(title: str, content: str, emoji: str, footer: str = None) -> dict:
+    """إنشاء Flex Message لعرض المحتوى"""
+    contents = [
+        {
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": emoji,
+                    "size": "xxl",
+                    "flex": 0,
+                    "margin": "md"
+                },
+                {
+                    "type": "text",
+                    "text": title,
+                    "weight": "bold",
+                    "size": "xl",
+                    "color": "#1a1a1a",
+                    "margin": "md",
+                    "wrap": True
+                }
+            ],
+            "paddingBottom": "15px"
+        },
+        {
+            "type": "separator",
+            "color": "#d9d9d9"
+        },
+        {
+            "type": "text",
+            "text": content,
+            "size": "md",
+            "color": "#333333",
+            "wrap": True,
+            "margin": "lg",
+            "lineSpacing": "8px"
+        }
+    ]
+    
+    if footer:
+        contents.extend([
+            {
+                "type": "separator",
+                "color": "#d9d9d9",
+                "margin": "lg"
+            },
+            {
+                "type": "text",
+                "text": footer,
+                "size": "sm",
+                "color": "#8c8c8c",
+                "margin": "md",
+                "align": "center",
+                "wrap": True
+            }
+        ])
+    
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": contents,
+            "paddingAll": "20px",
+            "backgroundColor": "#ffffff"
+        }
+    }
+
+def create_poem_flex(poem: dict) -> dict:
+    """إنشاء Flex Message للقصائد"""
+    title = poem.get('title', 'قصيدة')
+    poet = poem.get('poet', 'شاعر')
+    text = poem.get('text', '')
+    meaning = poem.get('meaning', '')
+    era = poem.get('era', '')  # العصر
+    
+    footer_text = f"✍️ {poet}"
+    if era:
+        footer_text += f" • {era}"
+    if meaning:
+        footer_text += f"\n\n💡 {meaning}"
+    
+    return create_content_flex(title, text, "📖", footer_text)
+
+def create_quote_flex(quote: dict) -> dict:
+    """إنشاء Flex Message للحكم"""
+    text = quote.get('text', '')
+    author = quote.get('author', '')
+    
+    footer = f"— {author}" if author else None
+    
+    return create_content_flex("حكمة", text, "💡", footer)
+
+def create_story_flex(story: dict, show_continue: bool = True) -> dict:
+    """إنشاء Flex Message للقصص"""
+    title = story.get('title', 'قصة')
+    part1 = story.get('part1', '')
+    
+    footer = "💬 اضغط على زر 'التكملة' لقراءة بقية القصة" if show_continue and 'part2' in story else None
+    
+    return create_content_flex(title, part1, "📚", footer)
+
+def create_games_list_flex() -> dict:
+    """قائمة الألعاب بتصميم Flex"""
     if not content_manager.games_list:
-        return "⚠️ لا توجد ألعاب متاحة حالياً."
+        return None
     
-    titles = ["🎮 الألعاب المتاحة:", ""]
-    number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    games_boxes = []
+    for i, game in enumerate(content_manager.games_list[:10]):  # حد أقصى 10 ألعاب
+        games_boxes.append({
+            "type": "box",
+            "layout": "horizontal",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": f"{i+1}",
+                    "size": "lg",
+                    "weight": "bold",
+                    "color": "#ffffff",
+                    "align": "center",
+                    "flex": 0,
+                    "backgroundColor": "#1a1a1a",
+                    "paddingAll": "8px",
+                    "cornerRadius": "5px"
+                },
+                {
+                    "type": "text",
+                    "text": game.get('title', f'اللعبة {i+1}'),
+                    "size": "md",
+                    "color": "#1a1a1a",
+                    "margin": "md",
+                    "wrap": True,
+                    "weight": "bold"
+                }
+            ],
+            "margin": "md",
+            "action": {
+                "type": "message",
+                "label": game.get('title', f'اللعبة {i+1}'),
+                "text": str(i+1)
+            }
+        })
     
-    for i, game in enumerate(content_manager.games_list):
-        emoji = number_emojis[i] if i < len(number_emojis) else f"{i+1}️⃣"
-        game_title = game.get('title', f'اللعبة {i+1}')
-        titles.append(f"{emoji} {game_title}")
-    
-    titles.append("")
-    titles.append(f"📌 أرسل رقم اللعبة (1-{len(content_manager.games_list)})")
-    
-    return "\n".join(titles)
+    return {
+        "type": "bubble",
+        "size": "mega",
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": "🎮 الألعاب المتاحة",
+                    "weight": "bold",
+                    "size": "xl",
+                    "color": "#1a1a1a"
+                },
+                {
+                    "type": "separator",
+                    "color": "#d9d9d9",
+                    "margin": "md"
+                },
+                {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": games_boxes,
+                    "spacing": "sm",
+                    "margin": "lg"
+                },
+                {
+                    "type": "text",
+                    "text": "اضغط على اللعبة للبدء",
+                    "size": "xs",
+                    "color": "#8c8c8c",
+                    "margin": "lg",
+                    "align": "center"
+                }
+            ],
+            "paddingAll": "20px",
+            "backgroundColor": "#ffffff"
+        }
+    }
 
-def calculate_result(answers: List[str], game_index: int) -> str:
-    """حساب نتيجة اللعبة"""
-    count = {"أ": 0, "ب": 0, "ج": 0}
-    for ans in answers:
-        if ans in count:
-            count[ans] += 1
-    
-    most_common = max(count, key=count.get)
-    game_key = f"لعبة{game_index + 1}"
-    result_text = content_manager.detailed_results.get(game_key, {}).get(
-        most_common,
-        f"✅ إجابتك الأكثر: {most_common}\n\n🎯 نتيجتك تعكس شخصية فريدة!"
-    )
-    
-    stats = f"\n\n📊 إحصائياتك:\n"
-    stats += f"أ: {count['أ']} | ب: {count['ب']} | ج: {count['ج']}"
-    return result_text + stats
+# === Rich Menu (القائمة الثابتة) ===
+
+def create_rich_menu():
+    """إنشاء Rich Menu للبوت"""
+    try:
+        # حذف القوائم القديمة
+        rich_menu_list = line_bot_api.get_rich_menu_list()
+        for menu in rich_menu_list:
+            line_bot_api.delete_rich_menu(menu.rich_menu_id)
+        
+        # إنشاء القائمة الجديدة
+        rich_menu = RichMenu(
+            size=RichMenuSize(width=2500, height=1686),
+            selected=True,
+            name="القائمة الرئيسية",
+            chat_bar_text="القائمة",
+            areas=[
+                # الصف الأول
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=0, y=0, width=833, height=843),
+                    action=MessageAction(text="سؤال")
+                ),
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=833, y=0, width=834, height=843),
+                    action=MessageAction(text="تحدي")
+                ),
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=1667, y=0, width=833, height=843),
+                    action=MessageAction(text="اعتراف")
+                ),
+                # الصف الثاني
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=0, y=843, width=625, height=843),
+                    action=MessageAction(text="قصيدة")
+                ),
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=625, y=843, width=625, height=843),
+                    action=MessageAction(text="شعر")
+                ),
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=1250, y=843, width=625, height=843),
+                    action=MessageAction(text="حكمة")
+                ),
+                RichMenuArea(
+                    bounds=RichMenuBounds(x=1875, y=843, width=625, height=843),
+                    action=MessageAction(text="قصة")
+                )
+            ]
+        )
+        
+        rich_menu_id = line_bot_api.create_rich_menu(rich_menu=rich_menu)
+        
+        # ملاحظة: يجب رفع صورة القائمة بشكل منفصل
+        # line_bot_api.set_rich_menu_image(rich_menu_id, 'image/png', open('rich_menu.png', 'rb'))
+        
+        # تعيين القائمة كافتراضية
+        line_bot_api.set_default_rich_menu(rich_menu_id)
+        
+        logger.info(f"تم إنشاء Rich Menu: {rich_menu_id}")
+        return rich_menu_id
+        
+    except Exception as e:
+        logger.error(f"خطأ في إنشاء Rich Menu: {e}")
+        return None
 
 # === Routes ===
 @app.route("/", methods=["GET"])
@@ -251,7 +565,7 @@ def home():
 
 @app.route("/health", methods=["GET"])
 def health_check():
-    return {"status": "healthy", "service": "enhanced-line-bot"}, 200
+    return {"status": "healthy", "service": "enhanced-line-bot-v2"}, 200
 
 @app.route("/callback", methods=["POST"])
 def callback():
@@ -279,22 +593,11 @@ def handle_message(event):
     try:
         # أمر المساعدة
         if text_lower in ["مساعدة", "help", "بداية", "start", "قائمة", "menu"]:
-            welcome_msg = "🌟 مرحباً بك في البوت الشامل!\n\n"
-            welcome_msg += "📋 الميزات المتاحة:\n"
-            welcome_msg += "❓ أسئلة عميقة ومثيرة\n"
-            welcome_msg += "🎯 تحديات ممتعة\n"
-            welcome_msg += "💬 اعترافات صادقة\n"
-            welcome_msg += "📖 أشعار وأبيات\n"
-            welcome_msg += "💡 حكم واقتباسات\n"
-            welcome_msg += "📚 قصص ملهمة\n"
-            welcome_msg += "🤔 أسئلة الاختيار\n"
-            welcome_msg += "🎮 ألعاب شخصية\n\n"
-            welcome_msg += "✨ اختر من القائمة أدناه:"
-            
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=welcome_msg, quick_reply=create_main_menu())
+            flex_message = FlexSendMessage(
+                alt_text="مرحباً بك في البوت",
+                contents=create_welcome_flex()
             )
+            line_bot_api.reply_message(event.reply_token, flex_message)
             return
         
         # معالجة الأوامر الأساسية
@@ -304,16 +607,23 @@ def handle_message(event):
             return
         
         # معالجة طلب تكملة القصة
-        if text_lower in ["كمل", "كمل القصة", "التكملة", "استمر"]:
+        if text_lower in ["كمل", "كمل القصة", "التكملة", "استمر", "تكملة"]:
             handle_story_continuation(event, user_id)
             return
         
         # معالجة طلب الألعاب
         if text_lower in ["لعبه", "لعبة", "العاب", "ألعاب", "game"]:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=get_games_list())
-            )
+            flex = create_games_list_flex()
+            if flex:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    FlexSendMessage(alt_text="الألعاب المتاحة", contents=flex)
+                )
+            else:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⚠️ لا توجد ألعاب متاحة حالياً")
+                )
             return
         
         # معالجة اختيار اللعبة
@@ -329,10 +639,7 @@ def handle_message(event):
         # رسالة افتراضية
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(
-                text="💫 اكتب 'قائمة' لعرض الخيارات المتاحة",
-                quick_reply=create_main_menu()
-            )
+            TextSendMessage(text="💫 اكتب 'قائمة' لعرض الخيارات المتاحة\nأو استخدم القائمة الثابتة أسفل الشاشة")
         )
         
     except Exception as e:
@@ -346,71 +653,121 @@ def handle_message(event):
             pass
 
 def handle_content_command(event, command: str):
-    """معالجة أوامر المحتوى المطورة"""
+    """معالجة أوامر المحتوى بتصميم Flex"""
     
-    if command == "شعر":
-        poem = content_manager.get_poem()
-        if not poem:
-            content = "⚠️ لا توجد قصائد متاحة حالياً."
-        else:
-            content = f"📖 {poem.get('title', 'قصيدة')}\n"
-            content += f"✍️ {poem.get('poet', 'شاعر')}\n\n"
-            content += f"{poem['text']}\n\n"
-            if 'meaning' in poem:
-                content += f"💡 {poem['meaning']}"
-    
-    elif command == "حكمة":
-        quote = content_manager.get_quote()
-        if not quote:
-            content = "⚠️ لا توجد حكم متاحة حالياً."
-        else:
-            content = f"💡 {quote['text']}\n\n"
-            if 'author' in quote and quote['author']:
-                content += f"✍️ {quote['author']}"
-    
-    elif command == "قصة":
-        story = content_manager.get_story()
-        if not story:
-            content = "⚠️ لا توجد قصص متاحة حالياً."
-        else:
+    try:
+        if command == "شعر":
+            poem = content_manager.get_poem()
+            if not poem:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⚠️ لا توجد أبيات شعرية متاحة حالياً")
+                )
+                return
+            
+            flex = create_poem_flex(poem)
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text=poem.get('title', 'قصيدة'), contents=flex)
+            )
+        
+        elif command == "قصيدة":
+            poem = content_manager.get_arab_poem()
+            if not poem:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⚠️ لا توجد قصائد متاحة حالياً")
+                )
+                return
+            
+            flex = create_poem_flex(poem)
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text=poem.get('title', 'قصيدة'), contents=flex)
+            )
+        
+        elif command == "حكمة":
+            quote = content_manager.get_quote()
+            if not quote:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⚠️ لا توجد حكم متاحة حالياً")
+                )
+                return
+            
+            flex = create_quote_flex(quote)
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text="حكمة", contents=flex)
+            )
+        
+        elif command == "قصة":
+            story = content_manager.get_story()
+            if not story:
+                line_bot_api.reply_message(
+                    event.reply_token,
+                    TextSendMessage(text="⚠️ لا توجد قصص متاحة حالياً")
+                )
+                return
+            
             user_story_state[event.source.user_id] = story
-            content = f"📚 {story.get('title', 'قصة')}\n\n"
-            content += f"{story['part1']}\n\n"
+            flex = create_story_flex(story, show_continue='part2' in story)
+            
+            messages = [FlexSendMessage(alt_text=story.get('title', 'قصة'), contents=flex)]
+            
+            # إضافة زر التكملة
             if 'part2' in story:
-                content += "💬 اكتب 'كمل' لقراءة التكملة"
-    
-    elif command == "اختيار":
-        choice = content_manager.get_would_you_rather()
-        if not choice:
-            content = "⚠️ لا توجد أسئلة متاحة حالياً."
+                quick_reply = QuickReply(items=[
+                    QuickReplyButton(action=MessageAction(label="📖 التكملة", text="تكملة"))
+                ])
+                messages.append(TextSendMessage(text=".", quick_reply=quick_reply))
+            
+            line_bot_api.reply_message(event.reply_token, messages)
+        
         else:
-            content = f"🤔 هل تفضل:\n\n"
-            content += f"🅰️ {choice['option_a']}\n\n"
-            content += f"أم\n\n"
-            content += f"🅱️ {choice['option_b']}\n\n"
-            content += "💭 فكّر جيداً قبل الاختيار!"
+            # الأوامر النصية العادية
+            content = content_manager.get_content(command)
+            if not content:
+                content = f"⚠️ لا توجد بيانات متاحة في قسم '{command}' حالياً"
+            
+            # تنسيق المحتوى
+            emoji_map = {
+                "سؤال": "💭",
+                "تحدي": "🎯",
+                "اعتراف": "💬",
+                "أكثر": "✨"
+            }
+            
+            emoji = emoji_map.get(command, "📌")
+            flex = create_content_flex(command, content, emoji)
+            line_bot_api.reply_message(
+                event.reply_token,
+                FlexSendMessage(alt_text=command, contents=flex)
+            )
     
-    else:
-        content = content_manager.get_content(command)
-        if not content:
-            content = f"⚠️ لا توجد بيانات متاحة في قسم '{command}' حالياً."
-    
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=content, quick_reply=create_main_menu())
-    )
+    except Exception as e:
+        logger.error(f"خطأ في معالجة الأمر {command}: {e}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⚠️ حدث خطأ في عرض المحتوى")
+        )
 
 def handle_story_continuation(event, user_id: str):
     """معالجة طلب تكملة القصة"""
     if user_id in user_story_state:
         story = user_story_state.pop(user_id)
         if 'part2' in story:
-            msg = f"📚 تكملة القصة:\n\n{story['part2']}\n\n"
-            if 'moral' in story:
-                msg += f"🌟 العبرة:\n{story['moral']}"
+            part2 = story['part2']
+            moral = story.get('moral', '')
+            
+            full_text = part2
+            if moral:
+                full_text += f"\n\n🌟 العبرة:\n{moral}"
+            
+            flex = create_content_flex("تكملة القصة", full_text, "📚")
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=msg, quick_reply=create_main_menu())
+                FlexSendMessage(alt_text="تكملة القصة", contents=flex)
             )
         else:
             line_bot_api.reply_message(
@@ -438,11 +795,17 @@ def handle_game_selection(event, user_id: str, num: int):
         options = "\n".join([f"{k}. {v}" for k, v in first_q["options"].items()])
         
         msg = f"🎮 {game.get('title', f'اللعبة {num}')}\n\n"
-        msg += f"❓ {first_q['question']}\n\n{options}\n\n📝 أرسل: أ، ب، ج"
+        msg += f"❓ {first_q['question']}\n\n{options}\n\n"
+        msg += f"━━━━━━━━━━━━━\n📝 أرسل: أ، ب، أو ج"
         
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=msg)
+        )
+    else:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⚠️ رقم اللعبة غير صحيح")
         )
 
 def handle_game_answer(event, user_id: str, text: str):
@@ -460,7 +823,9 @@ def handle_game_answer(event, user_id: str, text: str):
             q = game["questions"][state["question_index"]]
             options = "\n".join([f"{k}. {v}" for k, v in q["options"].items()])
             progress = f"[{state['question_index'] + 1}/{len(game['questions'])}]"
-            msg = f"{progress} ❓ {q['question']}\n\n{options}\n\n📝 أرسل: أ، ب، ج"
+            
+            msg = f"{progress} ❓ {q['question']}\n\n{options}\n\n"
+            msg += f"━━━━━━━━━━━━━\n📝 أرسل: أ، ب، أو ج"
             
             line_bot_api.reply_message(
                 event.reply_token,
@@ -468,16 +833,93 @@ def handle_game_answer(event, user_id: str, text: str):
             )
         else:
             result = calculate_result(state["answers"], state["game_index"])
-            final_msg = f"🎉 انتهت اللعبة!\n\n{result}\n\n💬 أرسل 'لعبه' لتجربة لعبة أخرى!"
+            
+            # إنشاء Flex للنتيجة
+            flex = {
+                "type": "bubble",
+                "size": "mega",
+                "body": {
+                    "type": "box",
+                    "layout": "vertical",
+                    "contents": [
+                        {
+                            "type": "text",
+                            "text": "🎉 النتيجة",
+                            "weight": "bold",
+                            "size": "xxl",
+                            "align": "center",
+                            "color": "#1a1a1a"
+                        },
+                        {
+                            "type": "separator",
+                            "color": "#d9d9d9",
+                            "margin": "lg"
+                        },
+                        {
+                            "type": "text",
+                            "text": result,
+                            "size": "md",
+                            "color": "#333333",
+                            "wrap": True,
+                            "margin": "lg",
+                            "lineSpacing": "8px"
+                        },
+                        {
+                            "type": "separator",
+                            "color": "#d9d9d9",
+                            "margin": "lg"
+                        },
+                        {
+                            "type": "text",
+                            "text": "💬 أرسل 'لعبة' لتجربة لعبة أخرى",
+                            "size": "sm",
+                            "color": "#8c8c8c",
+                            "margin": "md",
+                            "align": "center"
+                        }
+                    ],
+                    "paddingAll": "20px",
+                    "backgroundColor": "#ffffff"
+                }
+            }
             
             line_bot_api.reply_message(
                 event.reply_token,
-                TextSendMessage(text=final_msg, quick_reply=create_main_menu())
+                FlexSendMessage(alt_text="نتيجة اللعبة", contents=flex)
             )
             del user_game_state[user_id]
+    else:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="⚠️ الرجاء الإجابة بـ: أ، ب، أو ج")
+        )
+
+def calculate_result(answers: List[str], game_index: int) -> str:
+    """حساب نتيجة اللعبة"""
+    count = {"أ": 0, "ب": 0, "ج": 0}
+    for ans in answers:
+        if ans in count:
+            count[ans] += 1
+    
+    most_common = max(count, key=count.get)
+    game_key = f"لعبة{game_index + 1}"
+    result_text = content_manager.detailed_results.get(game_key, {}).get(
+        most_common,
+        f"✅ إجابتك الأكثر: {most_common}\n\n🎯 نتيجتك تعكس شخصية فريدة!"
+    )
+    
+    stats = f"\n\n📊 إحصائياتك:\n"
+    stats += f"أ: {count['أ']} | ب: {count['ب']} | ج: {count['ج']}"
+    return result_text + stats
 
 # === تشغيل التطبيق ===
 if __name__ == "__main__":
+    # محاولة إنشاء Rich Menu
+    try:
+        create_rich_menu()
+    except Exception as e:
+        logger.warning(f"لم يتم إنشاء Rich Menu: {e}")
+    
     port = int(os.getenv("PORT", 5000))
     logger.info(f"البوت المطور يعمل على المنفذ {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
