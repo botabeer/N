@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import json,os,logging,random,threading,time,requests
 from flask import Flask,request,abort
 from linebot import LineBotApi,WebhookHandler
